@@ -52,10 +52,6 @@ touches Three.js. The transform service is the only code that mutates object
 transforms. UI reads scene state only through the display adapter. Camera and
 object transforms are strictly separated (VIEWPORT context freezes object deltas).
 
-## Assets \& tools
-
-* `docs/` — the nine Module Builder specification documents (PRD, UX, gestures,
-architecture, contracts, plan, testing, decisions, directive)
 
 ## Workflow
 
