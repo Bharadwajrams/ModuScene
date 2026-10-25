@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Coverage
+coverage/
+
+# Temp
+*.tmp
+
+# Logs and runtime artifacts
+*.log
+*.log.err
+
+# 3D models and Blender files
+*.glb
+*.gltf
+*.blend
+*.blend1
+
+# Freebuff workspace state (machine-local)
+.freebuff/

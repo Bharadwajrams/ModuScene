@@ -1,0 +1,1441 @@
+/**
+ * Module Builder V1.2 — Main Stylesheet (EDITOR THEME: NAVY STRUCTURE + LIGHT WORKSPACE)
+ *
+ * Layout: CSS Grid/Flexbox for responsive workspace.
+ * Two states: CV Closed (100% 3D) and CV Open (50/50 3D + CV).
+ * Bottom Inspector is persistent in both states.
+ *
+ * Visual system (tokenized in :root below), following the reference design:
+ *   Dark navy structural header  #1d2b3f  (strongest layer)
+ *   Header toolbar buttons       #2b3d55  (lighter navy on navy)
+ *   Workspace / app background   #eef3fa  (cool off-white blue)
+ *   Panels (asset / CV panels)   #ffffff  (clean white controls)
+ *   Blue panel surface           #f4f8fd  (module-related light blue)
+ *   Mint surface                 #d9f2e5  (Viewport Control identity)
+ *   3D viewport                  #c9d9ec  (blue-tinted workspace)
+ *   CV bezel                     #0f1a26  (dark camera-monitor frame)
+ *   Text                         #22304a / muted #66748c
+ *   Selected chips               #1d2b3f navy + white text (dark selected states)
+ *   Accents: teal #2f9d84 · blue #4a7dbf · green #34a37f
+ *
+ * The design works by LAYER CONTRAST: dark navy header → light blue-white
+ * workspace → blue-tinted viewport → white controls → mint/teal accents →
+ * navy selected chips. Color is applied by function; the 3D viewport stays
+ * the visual focus.
+ */
+
+/* ─── Design Tokens ───────────────────────────────────── */
+
+:root {
+  /* Structural navy (header layer) */
+  --color-header: #1d2b3f;
+  --color-header-button: #2b3d55;
+  --color-header-button-hover: #374c69;
+  --color-header-button-active: #223248;
+  --color-header-border: #16202f;
+  --color-header-text: #eef3f9;
+  --color-header-text-muted: #b9c6d8;
+
+  /* Surfaces */
+  --color-app-bg: #eef3fa;
+  --color-panel: #ffffff;
+  --color-panel-blue: #f4f8fd;
+  --color-panel-mint: #d9f2e5;
+  --color-surface: #ffffff;
+  --color-surface-tint: #f1f6fc;
+  --color-viewport: #c9d9ec;
+  --color-viewport-grid: #a8bcd6;
+  --color-cv-bezel: #0f1a26;
+
+  /* Inputs */
+  --color-input: #ffffff;
+
+  /* Text */
+  --color-text: #22304a;
+  --color-text-secondary: #66748c;
+  --color-text-faint: #8b97ab;
+
+  /* Lines */
+  --color-border: #d3ddeb;
+  --color-border-strong: #b8c6da;
+
+  /* Accents (professional, restrained) */
+  --color-accent-teal: #2f9d84;
+  --color-accent-teal-strong: #23796a;
+  --color-accent-teal-tint: #d9f2e5;
+  --color-accent-blue: #4a7dbf;
+  --color-accent-blue-strong: #3a679f;
+  --color-accent-blue-tint: #e3edf9;
+  --color-accent-green: #34a37f;
+  --color-accent-green-strong: #27805f;
+  --color-accent-green-tint: #ddf3e7;
+
+  /* Selected / strong states (dark navy — the reference's selected chips) */
+  --color-selected: #1d2b3f;
+  --color-selected-text: #ffffff;
+
+  /* Elevation (soft, editor-like) */
+  --shadow-soft: 0 1px 3px rgba(24, 36, 54, 0.08), 0 1px 2px rgba(24, 36, 54, 0.05);
+  --shadow-raised: 0 2px 8px rgba(24, 36, 54, 0.1);
+
+  /* Radius scale (restrained) */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+}
+
+/* ─── Reset & Base ────────────────────────────────────── */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  color: var(--color-text);
+  background: var(--color-app-bg);
+}
+
+/* ─── App Root Layout ─────────────────────────────────── */
+
+.app-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+/* ─── Header / Toolbar ────────────────────────────────── */
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  /* Dark navy structural bar — the strongest layer of the hierarchy. */
+  background: var(--color-header);
+  border-bottom: 1px solid var(--color-header-border);
+  box-shadow: 0 1px 3px rgba(10, 17, 27, 0.25);
+  flex-shrink: 0;
+  height: 48px;
+}
+
+.app-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-header-text);
+  letter-spacing: 0.2px;
+}
+
+/* Application logo next to the title — the project icon asset
+   (public/moduscene-icon.svg, served from the site root in dev and build). */
+.app-title::before {
+  content: '';
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-accent-teal);
+  background-image: url('/moduscene-icon.svg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.cv-toggle-btn {
+  padding: 6px 16px;
+  /* The strongest accent in the header: professional saturated teal. */
+  background: var(--color-accent-teal);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+
+.cv-toggle-btn:hover {
+  background: var(--color-accent-teal-strong);
+  color: #ffffff;
+}
+
+.cv-toggle-btn--active {
+  background: var(--color-accent-teal);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+.cv-toggle-btn--active:hover {
+  background: var(--color-accent-teal-strong);
+  color: #ffffff;
+}
+
+/* ─── Toolbar ─────────────────────────────────────────── */
+
+.toolbar-container {
+  display: flex;
+  align-items: center;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}.toolbar-btn {
+  padding: 5px 11px;
+  /* Editor toolbar buttons: lighter navy on the navy header. */
+  background: var(--color-header-button);
+  color: var(--color-header-text);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+
+
+.toolbar-btn:hover {
+  background: var(--color-header-button-hover);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.toolbar-btn:active {
+  background: var(--color-header-button-active);
+  color: #ffffff;
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar-separator {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.14);
+  margin: 0 4px;
+}
+
+/* ─── Main Workspace ──────────────────────────────────── */
+
+.app-workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* CV Closed: 100% viewport */
+.app-workspace.layout--cv-closed {
+  flex-direction: row;
+}
+
+.app-workspace.layout--cv-closed .viewport-region {
+  flex: 1;
+  min-width: 0;
+}
+
+.app-workspace.layout--cv-closed .cv-region {
+  display: none !important;
+}
+
+/* CV Open: 50/50 split */
+.app-workspace.layout--cv-open {
+  flex-direction: row;
+}
+
+.app-workspace.layout--cv-open .viewport-region {
+  flex: 1;
+  min-width: 0;
+}
+
+.app-workspace.layout--cv-open .cv-region {
+  flex: 1;
+  min-width: 0;
+  display: flex !important;
+}
+
+/* ─── Asset Library Panel (left side, collapsible) ─────── */
+
+.asset-library-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  /* Professional editor sidebar: clean white with a blue-gray edge. */
+  background: var(--color-panel);
+  border-right: 1px solid var(--color-border);
+  box-shadow: 2px 0 8px rgba(24, 36, 54, 0.05);
+  overflow: hidden;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.asset-library-panel--collapsed {
+  width: 0;
+  min-width: 0;
+  padding: 0;
+  border-right: none;
+  overflow: visible;
+}
+
+.asset-library-panel--expanded {
+  width: 220px;
+  min-width: 220px;
+  pointer-events: auto;
+}
+
+.asset-library-panel__content {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  padding: 8px;
+
+  /* Hidden when collapsed */
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}
+
+.asset-library-panel--collapsed .asset-library-panel__content {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.asset-library-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Small uppercase group label: "Basic Shapes" / "Imported" */
+.asset-library-panel__section {
+  margin: 4px 0 1px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--color-text-secondary);
+}
+
+.asset-library-panel__section:first-child {
+  margin-top: 0;
+}
+
+.asset-library-panel__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  background: var(--color-panel-blue);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.asset-library-panel__row:hover {
+  background: var(--color-accent-blue-tint);
+  border-color: var(--color-accent-blue);
+}
+
+.asset-library-panel__info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.asset-library-panel__name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.asset-library-panel__status {
+  font-size: 10px;
+  color: var(--color-accent-green);
+}
+
+.asset-library-panel__add {
+  background: #e9eef7;
+  color: var(--color-accent-blue-strong);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.asset-library-panel__add:hover {
+  background: var(--color-accent-teal);
+  color: #ffffff;
+  border-color: var(--color-accent-teal);
+}
+
+.asset-library-panel__add:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.asset-library-panel__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* ─── Asset Library Toggle Button (left edge of viewport) ── */
+
+.asset-library-toggle {
+  position: absolute;
+  top: 48px;
+  left: 8px;
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.2s;
+  white-space: nowrap;
+  pointer-events: auto;
+  box-shadow: var(--shadow-soft);
+}
+
+.asset-library-toggle:hover {
+  background: var(--color-surface-tint);
+  color: var(--color-text);
+  border-color: var(--color-border-strong);
+}
+
+.asset-library-toggle--collapsed {
+  padding: 6px 8px;
+}
+
+.asset-library-toggle--collapsed .asset-library-toggle__label {
+  display: none;
+}
+
+.asset-library-toggle--expanded {
+  /* Move to right side of the expanded panel so it doesn't
+     overlap the asset names */
+  left: 228px;
+  top: 12px;
+}
+
+.asset-library-toggle__icon {
+  flex-shrink: 0;
+}
+
+.asset-library-toggle__label {
+  font-weight: 600;
+}
+
+.asset-library-toggle__close {
+  display: none;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--color-text-secondary);
+  padding: 0 2px;
+}
+
+.asset-library-toggle--expanded .asset-library-toggle__close {
+  display: inline;
+}
+
+/* ─── Viewport Region ─────────────────────────────────── */
+
+.viewport-region {
+  position: relative;
+  /* Blue-tinted workspace (CSS fallback behind the canvas; the Three.js
+     scene background in scene.ts carries the visible tone). */
+  background: var(--color-viewport);
+  overflow: hidden;
+  border: 1px solid var(--color-border-strong);
+}
+
+.three-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ─── CV Region ───────────────────────────────────────── */
+
+.cv-region {
+  position: relative;
+  /* Very dark navy camera-monitor frame — strong separation from the
+     light workspace (reference style). */
+  background: var(--color-cv-bezel);
+  flex-direction: column;
+  overflow: hidden;
+  border-left: 1px solid var(--color-border-strong);
+  /* Camera-monitor framing: the video is inset over the dark navy bezel so
+     the CV side reads as a monitoring device panel, visually distinct from
+     the workspace UI. The video and skeleton canvas share the SAME inset
+     rect, so their normalized-coordinate alignment is unchanged. */
+  padding: 10px;
+}
+
+.cv-video {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: calc(100% - 20px);
+  height: calc(100% - 20px);
+  object-fit: cover;
+  transform: scaleX(-1); /* Mirror for natural interaction */
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+/* ─── CV Tabs ─────────────────────────────────────────── */
+
+.cv-tabs {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px;
+}
+
+.cv-tab {
+  padding: 8px 20px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: var(--shadow-soft);
+  transition: all 0.2s;
+}
+
+.cv-tab:hover {
+  background: var(--color-surface);
+  border-color: var(--color-accent-teal);
+  box-shadow: var(--shadow-raised);
+}
+
+/* Active tab: filled with the tab's own functional accent (teal for
+   Viewport Control, blue for Module Selection — modifiers below). */
+.cv-tab--active {
+  background: var(--color-accent-teal);
+  color: #ffffff;
+  border-color: var(--color-accent-teal);
+}
+
+.cv-tab--active:hover {
+  background: var(--color-accent-teal-strong);
+}
+
+.cv-tab--ms.cv-tab--active {
+  background: var(--color-accent-blue-strong);
+  border-color: var(--color-accent-blue-strong);
+}
+
+.cv-tab--ms.cv-tab--active:hover {
+  background: var(--color-accent-blue);
+}
+
+/* Viewport Control tab: docked to the TOP-LEFT corner of the CV view, so
+   the left index fingertip reaches it without lowering the hand from its
+   natural UI-pointing posture. Positioned against the CV container (it is
+   appended to the container, not the top .cv-tabs strip). Positioning ONLY —
+   all size/style/hover behavior comes from .cv-tab unchanged, and
+   getTabBounds() reads the live DOM rect, so the pointer hitbox follows
+   automatically. z-index 15: above the video and panels (10), below the
+   cursor overlay (20) so the cursor dot stays visible while hovering the
+   tab. top: 10px aligns with the mode-badge band (badge is top-CENTER at
+   top 10px; Module Selection is top-RIGHT) — the top-left corner is free.
+   left: 36px = 10px corner inset + a 26px horizontal pull toward the CV
+   centre, so the left index fingertip can reach the tab while the whole
+   left hand stays inside the camera frame (flush to the edge, pointing
+   pushed the hand out of frame and tracking dropped it). Inset only —
+   vertical position, size and appearance are unchanged.
+   white-space: pre-line renders the \n in the label as a real line break
+   (two-line tab, more compact near-square shape); text-align keeps the
+   two lines flush left like the single-line version was. */
+.cv-tab--vc {
+  position: absolute;
+  top: 10px;
+  left: 36px;
+  z-index: 15;
+  white-space: pre-line;
+  text-align: left;
+  /* Pale-mint identity with dark teal text — the reference's Viewport
+     Control chip. */
+  background: var(--color-panel-mint);
+  border-color: #a9d8c4;
+  color: var(--color-accent-teal-strong);
+}
+
+/* Module Selection tab: docked to the TOP-RIGHT corner of the CV view.
+   Positioning ONLY — all size/style/hover behavior comes from .cv-tab
+   unchanged, and getTabBounds() reads the live DOM rect, so the pointer
+   hitbox follows automatically. Same z-index band as the left-docked
+   Viewport Control tab (above panels 10, below cursor 20). top: 44px sits
+   below the persistent mode-badge band (badge: top 10px, z 22, and it
+   widens in active/paused states) so the two never collide. */
+.cv-tab--ms {
+  position: absolute;
+  top: 44px;
+  right: 12px;
+  z-index: 15;
+  /* White chip with blue accents: module-related areas. */
+  background: var(--color-surface);
+  border-color: var(--color-accent-blue);
+  color: var(--color-accent-blue-strong);
+}
+
+/* ─── CV Panels ───────────────────────────────────────── */
+
+.cv-panel {
+  position: relative;
+  z-index: 10;
+  margin: 0 12px;
+  padding: 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-raised);
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* ─── Module Selection ────────────────────────────────── */
+
+.cv-module-selection {
+  position: relative;
+  z-index: 10;
+  margin: 0 12px;
+  padding: 12px;
+  /* Light/white surface with blue accents — the module-area identity. */
+  background: var(--color-panel-blue);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-raised);
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.cv-module-selection__header {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--color-accent-blue-strong);
+  margin-bottom: 8px;
+}
+
+.cv-module-selection__list {
+  /* TRUE GRID inside the existing dropdown: a fixed 4-column template with
+     1fr tracks GUARANTEES multiple columns and rows (10 modules → 4+4+2)
+     and can never collapse back to a single column/line. The dropdown's
+     dimensions are unchanged: the panel keeps its size and max-height and
+     more modules simply wrap into more rows within the same footprint.
+     Each cell is still a .cv-module-row with its own DOM rect, so
+     getModuleRowBounds() hit-testing, hover highlight and the 1 s hold
+     ring work per module exactly as before. */
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.cv-module-selection__empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.cv-module-row {
+  /* One grid cell = one module = the WHOLE interactive area. No Select
+     button: hover highlights, holding ~1 s selects (ring drawn on top).
+     position:relative anchors the hold ring to THIS cell; min-width:0 lets
+     the name shrink and truncate inside its 1fr track. */
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+/* Hover = subtle blue highlight. Mouse :hover and the CV-pointer --hovered
+   class share one treatment so both input paths look identical. */
+.cv-module-row:hover,
+.cv-module-row--hovered {
+  background: var(--color-accent-blue-tint);
+  border-color: var(--color-accent-blue);
+}
+
+/* SELECTED = persistent dark navy chip (1-second hold confirmed) — the
+   reference's dark selected-state treatment: obvious, non-neon, and it
+   reads instantly against the light panel.
+   !important so hover never repaints the confirmed cell. Transition off:
+   the navy snaps on instantly (the --just-selected flash already carries
+   the animation) and the settled color can never be caught mid-fade. */
+.cv-module-row--selected {
+  transition: none;
+  background: var(--color-selected) !important;
+  border-color: var(--color-selected) !important;
+  box-shadow: inset 0 0 0 1px var(--color-selected);
+}
+
+.cv-module-row--selected .cv-module-row__name {
+  color: var(--color-selected-text);
+  font-weight: 600;
+}
+
+/* Short mint flash the instant the hold confirmation lands, then it fades
+   to the persistent --selected navy state (class removed by
+   module-selection.ts after ~450 ms). */
+.cv-module-row--just-selected {
+  transition: none;
+  background: var(--color-panel-mint) !important;
+  border-color: var(--color-accent-teal) !important;
+  box-shadow: 0 0 0 2px rgba(47, 157, 132, 0.4);
+}
+
+.cv-module-row__name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+  /* Long names truncate with an ellipsis inside their grid cell instead of
+     overlapping neighboring cells. */
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Viewport Control (status-chip presentation) ────── */
+/* The panel keeps its .cv-panel wiring (open/close, pointer targets) but
+   presents as a small status chip instead of the large instructional block,
+   so the active VIEWPORT context is communicated without covering the
+   viewport. Content is set in cv-workspace.ts. */
+
+.cv-viewport-control--status {
+  position: absolute;
+  /* Below the persistent mode badge (top: 10px) so the two never collide. */
+  top: 44px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: auto;
+  max-width: calc(100% - 24px);
+  max-height: none;
+  overflow: visible;
+  padding: 6px 14px;
+  border-radius: 999px;
+  /* Pale-mint chip: viewport-control identity, matching its tab. */
+  background: var(--color-panel-mint);
+  border-color: #a9d8c4;
+}
+
+.cv-viewport-control__status {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--color-accent-teal-strong);
+  white-space: nowrap;
+}
+
+/* ─── Bottom Inspector ────────────────────────────────── */
+
+.inspector-region {
+  flex-shrink: 0;
+  /* Light cool blue-white editor dock (reference style). White inner
+     controls, navy labels, and the dark navy selected-module chip provide
+     the contrast layers. */
+  background: var(--color-panel-blue);
+  border-top: 1px solid var(--color-border);
+  box-shadow: 0 -1px 2px rgba(24, 36, 54, 0.04);
+  overflow-y: auto;
+  max-height: 300px;
+  /* Inspector content + the manual Module Selector share the bar
+     horizontally — the selector sits at the far right and the existing
+     controls keep their positions. */
+  display: flex;
+  align-items: stretch;
+}
+
+.inspector-region > .inspector-empty,
+.inspector-region > .inspector-content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.inspector-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.inspector-content {
+  padding: 10px 16px;
+}
+
+.inspector-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.inspector-module-name {
+  /* Dark navy selected-module chip — the reference's strongest inspector
+     accent, with the green status dot. */
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-selected-text);
+  background: var(--color-selected);
+  border-radius: var(--radius-md);
+  min-width: 120px;
+  padding: 7px 14px;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inspector-module-name::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--color-accent-green);
+}
+
+.inspector-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inspector-group-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text);
+}
+
+.inspector-row .inspector-group {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  align-items: center;
+}
+
+.inspector-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.inspector-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  min-width: 14px;
+}
+
+.inspector-input {
+  width: 72px;
+  padding: 4px 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.inspector-input:focus {
+  outline: none;
+  border-color: var(--color-accent-blue);
+  box-shadow: 0 0 0 2px rgba(74, 125, 191, 0.22);
+}
+
+/* Scale All — compact uniform-scale pair sitting after Scale X/Y/Z.
+   The section divider sits AFTER the pair (before Rotation). */
+.inspector-scale-all {
+  gap: 3px;
+  margin-left: 4px;
+  padding: 0 8px;
+  border-right: 1px solid var(--color-border);
+}
+
+.inspector-scale-all__btn {
+  width: 24px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.inspector-scale-all__btn:hover {
+  background: var(--color-accent-blue-tint);
+  border-color: var(--color-accent-blue);
+  color: var(--color-accent-blue-strong);
+}
+
+.inspector-scale-all__btn:focus-visible {
+  outline: none;
+  border-color: var(--color-accent-teal);
+  box-shadow: 0 0 0 2px rgba(47, 157, 132, 0.25);
+}
+
+/* ─── Manual Module Selector (Inspector bar, mouse) ──── */
+
+.manual-module-selector {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border-left: 1px solid var(--color-border);
+}
+
+.manual-module-selector__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.manual-module-selector__button:hover {
+  background: var(--color-accent-blue-tint);
+  border-color: var(--color-accent-blue);
+  color: var(--color-accent-blue-strong);
+}
+
+.manual-module-selector__button:focus-visible {
+  outline: none;
+  border-color: var(--color-accent-teal);
+  box-shadow: 0 0 0 2px rgba(47, 157, 132, 0.25);
+}
+
+/* Open = dark navy chip, the reference's strong selected-state treatment */
+.manual-module-selector__button[aria-expanded='true'] {
+  background: var(--color-selected);
+  border-color: var(--color-selected);
+  color: var(--color-selected-text);
+}
+
+.manual-module-selector__icon {
+  flex-shrink: 0;
+}
+
+.manual-module-selector__popup {
+  position: fixed;
+  z-index: 40;
+  width: 236px;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-panel);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-raised);
+  overflow: hidden;
+}
+
+.manual-module-selector__popup[hidden] {
+  display: none;
+}
+
+.manual-module-selector__header {
+  padding: 8px 12px;
+  background: var(--color-panel-blue);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+}
+
+.manual-module-selector__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.manual-module-selector__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+/* The checkbox sits beside the row button; the row keeps its own styling and
+   simply fills the remaining width. */
+.manual-module-selector__item > .manual-module-selector__row {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.manual-module-selector__checkbox {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  margin: 0 0 0 2px;
+  accent-color: var(--color-selected);
+  cursor: pointer;
+}
+
+.manual-module-selector__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.manual-module-selector__row:hover {
+  background: var(--color-accent-blue-tint);
+  border-color: var(--color-border);
+}
+
+.manual-module-selector__row--selected,
+.manual-module-selector__row--selected:hover {
+  background: var(--color-selected);
+  border-color: var(--color-selected);
+  color: var(--color-selected-text);
+  font-weight: 600;
+}
+
+.manual-module-selector__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manual-module-selector__id {
+  flex-shrink: 0;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 10px;
+  color: var(--color-text-faint);
+}
+
+.manual-module-selector__row--selected .manual-module-selector__id {
+  color: var(--color-header-text-muted);
+}
+
+.manual-module-selector__empty {
+  display: flex;
+  padding: 14px 12px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+/* Narrow windows: the label collapses to the grid glyph so the selector
+   stops competing with the transform fields for the bar's width (the button
+   keeps its title/aria-label, so it stays identifiable). */
+@media (max-width: 1400px) {
+  .manual-module-selector {
+    padding: 0 8px;
+  }
+
+  .manual-module-selector__button {
+    padding: 0 9px;
+  }
+
+  .manual-module-selector__label {
+    display: none;
+  }
+}
+
+/* ─── CV Cursor Overlay ──────────────────────────────── */
+
+.cv-cursor {
+  position: absolute;
+  z-index: 20;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(47, 157, 132, 0.3);
+  border: 2px solid rgba(35, 121, 106, 0.95);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition: left 0.05s linear, top 0.05s linear;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.5);
+}
+
+/* ─── CV Mode Indicator (V2.0) ───────────────────────── */
+
+/* Confirm ring: small circular 1-second progress, centered, non-blocking */
+.cv-mode-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.cv-mode-indicator--visible {
+  opacity: 1;
+}
+
+.cv-mode-indicator__ring {
+  width: 56px;
+  height: 56px;
+  color: var(--mode-color, var(--color-accent-blue));
+  filter: drop-shadow(0 1px 4px rgba(24, 36, 54, 0.45));
+}
+
+.cv-mode-indicator__label {
+  padding: 3px 10px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--color-text);
+}
+
+/* Persistent active-mode badge (top-center) */
+.cv-mode-badge {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 22;
+  padding: 4px 14px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--color-text);
+  box-shadow: var(--shadow-soft);
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.cv-mode-badge.cv-mode-badge--active {
+  color: var(--mode-color, var(--color-accent-teal));
+  border-color: var(--mode-color, var(--color-accent-teal));
+}
+
+/* Pause chip (left palm re-anchor). Sits just above the gesture guide,
+   which occupies the very bottom of the CV workspace. */
+.cv-paused-chip {
+  position: absolute;
+  bottom: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 22;
+  display: none;
+  padding: 5px 12px;
+  background: #fdf3e3;
+  border: 1px solid #c98d3f;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 600;
+  color: #8a5a1c;
+  box-shadow: var(--shadow-soft);
+}
+
+/* ─── CV Gesture Guide (bottom of the CV workspace) ──── */
+
+/* Slim, translucent informational strip. pointer-events: none — it can
+   never take a mouse click or a CV pointer target (hit-testing only knows
+   tabs / panels / module rows). */
+.cv-gesture-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 12; /* above the video (10) and skeleton (5), below the cursor (20) */
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 24px);
+  padding: 5px 11px;
+  background: rgba(15, 26, 38, 0.74);
+  border: 1px solid rgba(211, 221, 235, 0.18);
+  border-radius: var(--radius-md);
+  color: var(--color-header-text);
+  font-size: 11px;
+  line-height: 1.15;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
+.cv-gesture-bar__group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cv-gesture-bar__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.cv-gesture-bar__icon {
+  flex-shrink: 0;
+  color: #cfdcec;
+  opacity: 0.62;
+}
+
+.cv-gesture-bar__icon-accent {
+  stroke: var(--color-accent-teal);
+  opacity: 0.9;
+}
+
+.cv-gesture-bar__text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.cv-gesture-bar__label {
+  font-weight: 600;
+  color: var(--color-header-text);
+}
+
+.cv-gesture-bar__hint {
+  font-size: 10px;
+  color: rgba(185, 198, 216, 0.72);
+}
+
+.cv-gesture-bar__divider {
+  width: 1px;
+  height: 13px;
+  background: rgba(211, 221, 235, 0.22);
+}
+
+/* Narrower CV column: drop the gesture words first (the mode labels stay),
+   then tighten the rhythm — the strip never leaves the workspace. */
+@media (max-width: 1400px) {
+  .cv-gesture-bar {
+    gap: 8px;
+    padding: 4px 9px;
+  }
+
+  .cv-gesture-bar__group {
+    gap: 8px;
+  }
+
+  .cv-gesture-bar__hint {
+    display: none;
+  }
+}
+
+@media (max-width: 1100px) {
+  .cv-gesture-bar {
+    gap: 6px;
+    padding: 4px 8px;
+    font-size: 10px;
+  }
+
+  .cv-gesture-bar__group {
+    gap: 6px;
+  }
+}
+
+/* Module-row hover highlight for the CV pointer lives with :hover in the
+   .cv-module-row block above — single source for both input paths. */
+
+/* 1-second selection hold: small circular progress ring (right side of row).
+   Same visual confirmation language as the mode-confirm timer. */
+.cv-module-row__holdring {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--color-accent-blue) calc(var(--hold-progress, 0) * 360deg),
+    rgba(94, 134, 166, 0.18) 0
+  );
+  box-shadow: 0 0 0 2px #ffffff, 0 1px 4px rgba(37, 50, 56, 0.25);
+  pointer-events: none;
+  /* Rings are pre-created in every cell (so a hold never reflows the grid)
+     but stay invisible until that cell is actually being held. */
+  opacity: 0;
+}
+
+.cv-module-row--holding .cv-module-row__holdring {
+  opacity: 1;
+}
+
+/* While holding, the cell's border pulses blue (matches the ring). Rings are
+   pre-created in every cell, so a hold never mutates or reflows the grid. */
+.cv-module-row--holding {
+  border-color: var(--color-accent-blue) !important;
+}
+
+/* ─── CV Skeleton Canvas ─────────────────────────────── */
+
+.cv-skeleton-canvas {
+  position: absolute;
+  /* Same rect as .cv-video — skeleton coordinates stay aligned with the
+     displayed camera feed. */
+  top: 10px;
+  left: 10px;
+  width: calc(100% - 20px);
+  height: calc(100% - 20px);
+  z-index: 5;
+  pointer-events: none;
+  border-radius: var(--radius-lg);
+}
+
+/* ─── App Notice (non-blocking toast) ────────────────── */
+
+.app-notice {
+  position: fixed;
+  top: 60px;
+  right: 16px;
+  z-index: 40;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 360px;
+  padding: 10px 12px;
+  background: var(--color-selected);
+  color: var(--color-header-text);
+  border-left: 3px solid var(--color-accent-teal);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-raised);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.app-notice__text {
+  flex: 1 1 auto;
+}
+
+.app-notice__close {
+  flex-shrink: 0;
+  padding: 0;
+  width: 16px;
+  height: 16px;
+  background: transparent;
+  border: none;
+  color: var(--color-header-text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.app-notice__close:hover {
+  color: var(--color-header-text);
+}
+
+/* ─── Scrollbar Styling ───────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-faint);
+}
