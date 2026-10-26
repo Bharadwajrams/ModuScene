@@ -30,6 +30,8 @@
  *   L17 small vertical motion is responsive on X (T-06)
  *   L18 X reversal stays responsive; deliberate stop does not coast (T-06)
  *   L19 vertical bob tolerance — held hand produces no X drift (T-06)
+ *   L23 two-hand anchor (BOTH palms) pauses the session — including after
+ *       the left hand selected an axis (the latched selection-role miss)
  *
  * Live-only checks (not unit-runnable): Z polarity preference, X-rotation
  * wobble feel, manual module selection with CV stopped.
@@ -162,7 +164,8 @@ describe('L2: Z movement behaves as rate control (push and hold KEEPS position)'
     let t = confirmGesture(controller, spanned(0.15));
     expect(controller.getInteractionState().mode).toBe('MOVE');
 
-    // Push: hand retreats from span 0.15 to 0.12 over 12 frames.
+    // Push: hand retreats from span 0.15 to 0.12 over 12 frames → the object
+    // moves away from the viewer (−Z; the camera sits on the +Z side).
     for (let i = 1; i <= 12; i++) {
       step(controller, spanned(0.15 - 0.0025 * i), t);
       t += FRAME_MS;
@@ -170,7 +173,7 @@ describe('L2: Z movement behaves as rate control (push and hold KEEPS position)'
     const pushed = deltas
       .filter((d) => d.phase === 'UPDATE')
       .reduce((s, d) => s + d.delta.position.z, 0);
-    expect(pushed).toBeGreaterThan(0.05); // the push actually moved the object
+    expect(pushed).toBeLessThan(-0.05); // the push actually moved the object
 
     // HOLD: the user stops at the new depth (span stays at 0.12).
     const before = deltas.filter((d) => d.phase === 'UPDATE').length;
@@ -186,9 +189,11 @@ describe('L2: Z movement behaves as rate control (push and hold KEEPS position)'
       .reduce((s, d) => s + d.delta.position.z, 0);
 
     // CONTRACT: holding the hand at the reached depth must keep the object
-    // there (rate semantics). Today's absolute-anchor model emits corrective
-    // −Z deltas as the span EMA "recovers", pulling the object back.
-    expect(netAfter - netBefore).toBeGreaterThan(-0.05);
+    // there (rate semantics). The absolute-anchor model still settles along
+    // the push direction (−Z) while the span EMA converges; what must never
+    // happen is a REVERSAL back toward the viewer (+Z), which would pull the
+    // object home behind the user's hand.
+    expect(netAfter - netBefore).toBeLessThan(0.05);
     void before;
   });
 
@@ -208,7 +213,7 @@ describe('L2: Z movement behaves as rate control (push and hold KEEPS position)'
     const afterPush = deltas
       .filter((d) => d.phase === 'UPDATE')
       .reduce((s, d) => s + d.delta.position.z, 0);
-    expect(afterPush).toBeGreaterThan(0.05);
+    expect(afterPush).toBeLessThan(-0.05);
 
     // …and return the hand to the start span WITHOUT releasing the grab.
     for (let i = 1; i <= 12; i++) {
@@ -225,7 +230,7 @@ describe('L2: Z movement behaves as rate control (push and hold KEEPS position)'
     // may not leave a large residue in ONE direction (EMA convergence lag
     // accounts for the small remainder).
     expect(Math.abs(afterReturn)).toBeLessThan(0.15);
-    expect(afterReturn).toBeLessThan(afterPush); // net reversal happened
+    expect(afterReturn).toBeGreaterThan(afterPush); // net reversal happened
   });
 });
 
@@ -361,8 +366,9 @@ describe('L8: Z move — a fast deliberate depth push is not mistaken for a tele
     const pushed = deltas
       .filter((d) => d.phase === 'UPDATE')
       .reduce((s, d) => s + d.delta.position.z, 0);
-    // CONTRACT: the fast push produces real +Z movement.
-    expect(pushed).toBeGreaterThan(0.05);
+    // CONTRACT: the fast push produces real −Z movement (away from the
+    // viewer — the depth axis follows the retreating hand).
+    expect(pushed).toBeLessThan(-0.05);
   });
 });
 
@@ -470,9 +476,191 @@ describe('L11: Z drives the object while the drifted selection hand is up', () =
     const pushed = deltas
       .filter((d) => d.phase === 'UPDATE')
       .reduce((s, d) => s + d.delta.position.z, 0);
-    // CONTRACT: Z movement flowed — no pause ever froze the session.
-    expect(pushed).toBeGreaterThan(0.05);
+    // CONTRACT: Z movement flowed — no pause ever froze the session
+    // (the retreating hand pushes the object away from the viewer, −Z).
+    expect(pushed).toBeLessThan(-0.05);
     expect(controller.getInteractionState().paused).toBe(false);
+  });
+});
+
+// ─── L20–L22: Z direction, sustained Z drive, pause recovery ───
+// The depth axis had two independent defects:
+//   1. its SIGN ran against the hand — the object receded as the hand came
+//      toward the camera while X and Y followed the palm centre;
+//   2. the pause/selection disambiguation was a 500 ms RECENCY window, so a
+//      normal multi-second Z drive with a drifted pinky (4-finger read =
+//      OPEN_PALM) engaged the left-palm pause mid-drive and froze EVERY
+//      axis silently — the "CV stopped responding" failure.
+
+/** Right hand at a given palm span (the depth proxy) and palm centre. */
+function depthHand(span: number, cx = 0.5, cy = 0.5): HandState {
+  return makeHand({
+    gesture: 'GRAB',
+    center: { x: cx, y: cy, z: 0 },
+    landmarks: makeLandmarks(cx, cy, span),
+  });
+}
+
+describe('L20: MOVE Z follows the hand in depth (world +Z faces the camera)', () => {
+  it('hand toward the camera → +Z (toward the viewer); retreat → −Z', () => {
+    const controller = new InteractionController();
+    const deltas: DeltaPayload[] = [];
+    controller.onDelta((p) => deltas.push(p));
+    controller.setControlAxis('Z');
+
+    let t = confirmGesture(controller, depthHand(0.15));
+    expect(controller.getInteractionState().mode).toBe('MOVE');
+
+    // Approach: span 0.15 → 0.19 (hand coming toward the camera).
+    for (let i = 1; i <= 16; i++) {
+      step(controller, depthHand(0.15 + 0.0025 * i), t);
+      t += FRAME_MS;
+    }
+    const approach = deltas
+      .filter((d) => d.phase === 'UPDATE')
+      .reduce((s, d) => s + d.delta.position.z, 0);
+    expect(approach).toBeGreaterThan(0.05);
+
+    // Retreat back through the start depth: the object follows the hand out.
+    for (let i = 1; i <= 16; i++) {
+      step(controller, depthHand(0.19 - 0.005 * i), t);
+      t += FRAME_MS;
+    }
+    const retreat = deltas
+      .filter((d) => d.phase === 'UPDATE')
+      .reduce((s, d) => s + d.delta.position.z, 0);
+    expect(retreat).toBeLessThan(approach); // real reversal
+  });
+
+  it('a Z drive emits ONLY z components (axes stay independent)', () => {
+    const controller = new InteractionController();
+    const deltas: DeltaPayload[] = [];
+    controller.onDelta((p) => deltas.push(p));
+    controller.setControlAxis('Z');
+
+    let t = confirmGesture(controller, depthHand(0.15));
+    for (let i = 1; i <= 16; i++) {
+      step(controller, depthHand(0.15 + 0.0025 * i), t);
+      t += FRAME_MS;
+    }
+    const moveDeltas = deltas.filter(
+      (d) => d.phase === 'UPDATE' && d.delta.position.z !== 0,
+    );
+    expect(moveDeltas.length).toBeGreaterThan(0);
+    for (const d of moveDeltas) {
+      expect(d.delta.position.x).toBe(0);
+      expect(d.delta.position.y).toBe(0);
+    }
+
+    // Switching to X must produce x-only movement — the depth channel is not
+    // still leaking into the offset.
+    controller.setControlAxis('X');
+    const beforeX = deltas.length;
+    for (let i = 1; i <= 12; i++) {
+      step(controller, depthHand(0.19, 0.5 + 0.004 * i), t);
+      t += FRAME_MS;
+    }
+    const xDeltas = deltas
+      .slice(beforeX)
+      .filter((d) => d.phase === 'UPDATE' && (d.delta.position.x !== 0 || d.delta.position.y !== 0));
+    expect(xDeltas.length).toBeGreaterThan(0);
+    for (const d of xDeltas) {
+      expect(d.delta.position.z).toBe(0);
+    }
+  });
+});
+
+describe('L21: a sustained Z drive never pauses on a drifted selection hand', () => {
+  it('2 s of 4-finger pinky drift during an active Z drive keeps moving the object', () => {
+    const controller = new InteractionController();
+    const deltas: DeltaPayload[] = [];
+    controller.onDelta((p) => deltas.push(p));
+    controller.setControlAxis('Z');
+
+    let t = confirmGesture(controller, depthHand(0.15));
+    expect(controller.getInteractionState().mode).toBe('MOVE');
+
+    // The user selects Z with three fingers…
+    for (let i = 0; i < 8; i++) {
+      step(controller, depthHand(0.15), t, leftSelectionHand(3));
+      t += FRAME_MS;
+    }
+    // …the pinky relaxes to FOUR fingers (OPEN_PALM read) and STAYS open for
+    // two full seconds while the drive continues (a depth stroke lasts
+    // seconds — the old 500 ms window expired in the middle of it).
+    for (let i = 1; i <= 60; i++) {
+      const st = step(controller, depthHand(0.15 + 0.001 * i), t, leftDriftedPalm());
+      t += FRAME_MS;
+      expect(st.paused).toBe(false);
+      expect(st.mode).toBe('MOVE');
+    }
+
+    const moved = deltas
+      .filter((d) => d.phase === 'UPDATE')
+      .reduce((s, d) => s + d.delta.position.z, 0);
+    expect(moved).toBeGreaterThan(0.05);
+    expect(deltas.filter((d) => d.phase === 'END').length).toBe(0);
+  });
+});
+
+describe('L22: an engaged pause is not terminal', () => {
+  it('an axis-selection count releases the pause on the next frame and Z resumes', () => {
+    const controller = new InteractionController();
+    const deltas: DeltaPayload[] = [];
+    controller.onDelta((p) => deltas.push(p));
+    controller.setControlAxis('Z');
+
+    let t = confirmGesture(controller, depthHand(0.15));
+
+    // Deliberate pause: an open palm with no selection activity this session.
+    let st = controller.getInteractionState();
+    for (let i = 0; i < 20; i++) {
+      st = step(controller, depthHand(0.15), t, leftDriftedPalm());
+      t += FRAME_MS;
+    }
+    expect(st.paused).toBe(true);
+
+    // The user re-tenses the selection fingers to keep driving: that is an
+    // explicit selection signal, never a pause — release it immediately.
+    st = step(controller, depthHand(0.15), t, leftSelectionHand(3));
+    t += FRAME_MS;
+    expect(st.paused).toBe(false);
+
+    const before = deltas.length;
+    for (let i = 1; i <= 16; i++) {
+      step(controller, depthHand(0.15 + 0.0025 * i), t, leftSelectionHand(3));
+      t += FRAME_MS;
+    }
+    const moved = deltas
+      .slice(before)
+      .filter((d) => d.phase === 'UPDATE')
+      .reduce((s, d) => s + d.delta.position.z, 0);
+    expect(moved).toBeGreaterThan(0.05);
+  });
+
+  it('a deliberate pause is still available once the selection hand is released', () => {
+    const controller = new InteractionController();
+    let t = confirmGesture(controller, depthHand(0.15));
+
+    // Select Z, then LOWER the left hand for longer than the release window…
+    for (let i = 0; i < 10; i++) {
+      step(controller, depthHand(0.15), t, leftSelectionHand(3));
+      t += FRAME_MS;
+    }
+    for (let i = 0; i < 30; i++) {
+      step(controller, depthHand(0.15), t, null);
+      t += FRAME_MS;
+    }
+    expect(controller.getInteractionState().paused).toBe(false);
+
+    // …and a fresh open palm pauses exactly as before.
+    let st = controller.getInteractionState();
+    for (let i = 0; i < 20; i++) {
+      st = step(controller, depthHand(0.15), t, leftDriftedPalm());
+      t += FRAME_MS;
+    }
+    expect(st.paused).toBe(true);
+    expect(st.mode).toBe('MOVE');
   });
 });
 
@@ -1002,5 +1190,199 @@ describe('L15d: the bridge window is bounded and derived from the fixture (T-04)
     // (Hard boundedness — carry decay + frame cap + genuine-stop gate — is
     // pinned by L15b and L14.)
     expect(emittedDuringDip).toBeLessThanOrEqual(30);
+  });
+});
+
+// ─── L23: two-hand anchor (BOTH palms) ────────────────────
+// The anchor pose is two open palms. The left palm IS the pause channel, but
+// the pause-vs-selection guard keys on the selection HAND ROLE, which latches
+// for as long as that hand stays tracked. After a normal axis selection
+// (Z = 3 fingers) the role was still latched when both palms went up, so the
+// anchor was "recognised" and never paused — the right palm then confirmed
+// ROTATE and CV kept manipulating. The guard is now scoped to what the RIGHT
+// hand is doing (a drifted pinky only rides along with a DRIVING pose).
+
+/** RIGHT hand open palm — the anchor partner (and the ROTATE pose). */
+function rightPalm(cx = 0.7, cy = 0.5): HandState {
+  return makeHand({
+    gesture: 'OPEN_PALM',
+    handedness: 'right',
+    fingerState: { index: true, middle: true, ring: true, pinky: true, thumb: true },
+    center: { x: cx, y: cy, z: 0 },
+  });
+}
+
+/** The pause confirms after a short hold (PAUSE_CONFIRM_FRAMES = 12); allow
+ *  a little slack so the assertion is about "engages", not the exact frame. */
+const ANCHOR_ENGAGE_FRAMES = 15;
+
+describe('L23: two-hand anchor pauses the session', () => {
+  it('left palm alone still pauses an active MOVE (unchanged)', () => {
+    const controller = new InteractionController();
+    const deltas: DeltaPayload[] = [];
+    controller.onDelta((p) => deltas.push(p));
+    let t = confirmGesture(controller, makeHand({ gesture: 'GRAB' }));
+
+    let st = controller.getInteractionState();
+    for (let i = 0; i < 20; i++) {
+      st = step(controller, makeHand({ gesture: 'GRAB' }), t, leftDriftedPalm());
+      t += FRAME_MS;
+    }
+    expect(st.paused).toBe(true);
+    expect(st.mode).toBe('MOVE');
+    expect(deltas.filter((d) => d.phase === 'BEGIN').length).toBe(1);
+  });
+
+  it('both palms pause — including right after the left hand selected an axis', () => {
+    const controller = new InteractionController();
+    const deltas: DeltaPayload[] = [];
+    controller.onDelta((p) => deltas.push(p));
+    let t = confirmGesture(controller, makeHand({ gesture: 'GRAB' }));
+    expect(controller.getInteractionState().mode).toBe('MOVE');
+
+    // The user selected an axis with the left hand earlier in this session —
+    // the reported precondition. (3 fingers = Z.)
+    for (let i = 0; i < 12; i++) {
+      step(controller, makeHand({ gesture: 'GRAB' }), t, leftSelectionHand(3));
+      t += FRAME_MS;
+    }
+    const before = deltas.length;
+
+    // Both palms up, the right palm drifting a little (real hands do).
+    let pausedAt = -1;
+    let st = controller.getInteractionState();
+    for (let i = 0; i < 40; i++) {
+      st = step(controller, rightPalm(0.7 + 0.004 * i), t, leftDriftedPalm());
+      t += FRAME_MS;
+      if (st.paused && pausedAt < 0) pausedAt = i;
+    }
+
+    // CONTRACT: the anchor engages (within the pause confirmation window)…
+    expect(pausedAt).toBeGreaterThanOrEqual(0);
+    expect(pausedAt).toBeLessThan(ANCHOR_ENGAGE_FRAMES);
+    expect(st.paused).toBe(true);
+    // …the pause never changes the MODE, and no transform of any kind leaks:
+    // no mode switch/AXIS re-begin, no object deltas.
+    expect(st.mode).toBe('MOVE');
+    const after = deltas.slice(before);
+    expect(after.filter((d) => d.phase === 'BEGIN').length).toBe(0);
+    expect(after.filter((d) => d.phase === 'UPDATE').length).toBe(0);
+  });
+
+  it('the anchor holds: no toggling while both palms stay up', () => {
+    const controller = new InteractionController();
+    const deltas: DeltaPayload[] = [];
+    controller.onDelta((p) => deltas.push(p));
+    let t = confirmGesture(controller, makeHand({ gesture: 'GRAB' }));
+
+    const flutter: boolean[] = [];
+    for (let i = 0; i < 90; i++) {
+      const st = step(controller, rightPalm(0.7 + 0.002 * (i % 5)), t, leftDriftedPalm());
+      t += FRAME_MS;
+      if (i >= 20) flutter.push(st.paused);
+    }
+    // CONTRACT: once anchored, every frame stays anchored (no pause flicker).
+    expect(flutter.every((p) => p === true)).toBe(true);
+    expect(controller.getInteractionState().mode).toBe('MOVE');
+    expect(deltas.filter((d) => d.phase === 'UPDATE').length).toBe(0);
+    expect(deltas.filter((d) => d.phase === 'END').length).toBe(0);
+  });
+
+  it('releasing the anchor resumes on the existing grace and re-anchors', () => {
+    const controller = new InteractionController();
+    const deltas: DeltaPayload[] = [];
+    controller.onDelta((p) => deltas.push(p));
+    let t = confirmGesture(controller, makeHand({ gesture: 'GRAB' }));
+
+    for (let i = 0; i < 20; i++) {
+      step(controller, rightPalm(), t, leftDriftedPalm());
+      t += FRAME_MS;
+    }
+    expect(controller.getInteractionState().paused).toBe(true);
+
+    // Both palms down. Within the palm-release grace the session stays frozen…
+    let st = controller.getInteractionState();
+    for (let i = 0; i < 5; i++) {
+      st = step(controller, makeHand({ gesture: 'GRAB' }), t);
+      t += FRAME_MS;
+    }
+    expect(st.paused).toBe(true);
+
+    // …then resumes, still in MOVE (the pause never changed the mode).
+    for (let i = 0; i < 30; i++) {
+      st = step(controller, makeHand({ gesture: 'GRAB' }), t);
+      t += FRAME_MS;
+    }
+    expect(st.paused).toBe(false);
+    expect(st.mode).toBe('MOVE');
+
+    // And the transformation responds again — re-anchored, so no lurch.
+    const before = deltas.length;
+    for (let i = 1; i <= 12; i++) {
+      step(controller, makeHand({ gesture: 'GRAB', center: { x: 0.5 + 0.006 * i, y: 0.5, z: 0 } }), t);
+      t += FRAME_MS;
+    }
+    const moved = deltas
+      .slice(before)
+      .filter((d) => d.phase === 'UPDATE')
+      .reduce((s, d) => s + Math.abs(d.delta.position.x), 0);
+    expect(moved).toBeGreaterThan(0);
+  });
+
+  it('dropping the transform hand while anchored keeps the pause (no stuck state)', () => {
+    const controller = new InteractionController();
+    let t = confirmGesture(controller, makeHand({ gesture: 'GRAB' }));
+
+    for (let i = 0; i < 20; i++) {
+      step(controller, rightPalm(), t, leftDriftedPalm());
+      t += FRAME_MS;
+    }
+    expect(controller.getInteractionState().paused).toBe(true);
+
+    // The right (transform) hand leaves the frame; the left palm stays up.
+    // Loss of the transform hand must not silently RELEASE the anchor while
+    // the palm that requested it is still visible.
+    let st = controller.getInteractionState();
+    for (let i = 0; i < 30; i++) {
+      st = step(controller, null, t, leftDriftedPalm());
+      t += FRAME_MS;
+    }
+    expect(st.paused).toBe(true);
+
+    // Removing the palm afterwards resumes exactly as designed.
+    for (let i = 0; i < 40; i++) {
+      st = step(controller, makeHand({ gesture: 'GRAB' }), t);
+      t += FRAME_MS;
+    }
+    expect(st.paused).toBe(false);
+    expect(st.mode).toBe('MOVE');
+  });
+
+  it('re-presenting the palms re-anchors — the gesture is not one-shot', () => {
+    const controller = new InteractionController();
+    let t = confirmGesture(controller, makeHand({ gesture: 'GRAB' }));
+
+    for (let i = 0; i < 20; i++) {
+      step(controller, rightPalm(), t, leftDriftedPalm());
+      t += FRAME_MS;
+    }
+    expect(controller.getInteractionState().paused).toBe(true);
+
+    let st = controller.getInteractionState();
+    for (let i = 0; i < 40; i++) {
+      st = step(controller, makeHand({ gesture: 'GRAB' }), t);
+      t += FRAME_MS;
+    }
+    expect(st.paused).toBe(false);
+
+    // Anchor again: same two palms, fresh request.
+    let pausedAgain = false;
+    for (let i = 0; i < 20; i++) {
+      st = step(controller, rightPalm(), t, leftDriftedPalm());
+      t += FRAME_MS;
+      if (st.paused) pausedAgain = true;
+    }
+    expect(pausedAgain).toBe(true);
+    expect(st.mode).toBe('MOVE');
   });
 });

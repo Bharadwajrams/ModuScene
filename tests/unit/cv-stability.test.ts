@@ -391,7 +391,7 @@ describe('InteractionController: MOVE (stable, anchored, capped)', () => {
     }
   });
 
-  it('MOVE Z: palm-span shrink (hand away from camera) drives +Z; growth drives −Z', () => {
+  it('MOVE Z: palm-span shrink (hand away from camera) drives −Z; growth drives +Z', () => {
     controller.setControlAxis('Z');
     const spanned = (span: number) => {
       const h = makeHand({ gesture: 'GRAB' });
@@ -400,23 +400,26 @@ describe('InteractionController: MOVE (stable, anchored, capped)', () => {
     };
     let t = confirmGesture(controller, spanned(0.15));
 
-    // Hand retreats → span shrinks → +Z (push-through-screen). The slow
-    // depth channel needs a few frames of travel before the correction
-    // builds past the deadzone, so feed a sustained retreat.
+    // Hand retreats → span shrinks → −Z, i.e. AWAY from the viewer ("through
+    // the screen"). The scene camera sits at +Z (scene.ts: 5, 5, 10), so −Z
+    // is the deeper side; the depth axis thus follows the hand exactly like
+    // X and Y follow the palm centre. The slow depth channel needs a few
+    // frames of travel before the correction builds past the deadzone, so
+    // feed a sustained retreat.
     for (let i = 1; i <= 10; i++) {
       step(controller, spanned(0.15 - 0.01 * i), t);
       t += FRAME_MS;
     }
-    const zPos = updates().filter((d) => d.delta.position.z !== 0).map((d) => d.delta.position.z);
-    expect(zPos.some((z) => z > 0.01)).toBe(true);
+    const zNeg = updates().filter((d) => d.delta.position.z !== 0).map((d) => d.delta.position.z);
+    expect(zNeg.some((z) => z < -0.01)).toBe(true);
 
-    // Hand approaches → span grows → −Z.
+    // Hand approaches → span grows → +Z (toward the viewer).
     for (let i = 1; i <= 10; i++) {
       step(controller, spanned(0.1 + 0.01 * i), t);
       t += FRAME_MS;
     }
     const allZ = updates().filter((d) => d.delta.position.z !== 0).map((d) => d.delta.position.z);
-    expect(allZ.some((z) => z < -0.01)).toBe(true);
+    expect(allZ.some((z) => z > 0.01)).toBe(true);
   });
 
   it('MOVE Z rejects span noise: holding still does not wobble the depth axis', () => {

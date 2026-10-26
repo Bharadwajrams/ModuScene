@@ -281,6 +281,17 @@ export class CVEngine {
     // this context too, but ignore its object deltas (context separation).
     this.interactionController.processFrame(handFrame, now);
 
+    // ── Anchor freezes the CAMERA too ──
+    // The anchor pose is two open palms, and the right palm IS the orbit
+    // gesture: without this gate the camera kept orbiting while the session
+    // reported itself anchored (the object was frozen, the view was not).
+    // Releasing the anchor resumes from a fresh palm anchor (lastPalm null),
+    // so the view never jumps by the distance the palm moved while held.
+    if (this.interactionController.getInteractionState().paused) {
+      this.resetViewState();
+      return;
+    }
+
     const right = handFrame.rightHand;
     const cam = this.cameraAccessor?.();
     if (!cam) {

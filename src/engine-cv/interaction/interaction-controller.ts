@@ -27,7 +27,9 @@
  *
  * Left-hand OPEN_PALM pauses the active transformation and, on release,
  * re-anchors the right-hand control position — so the user can reposition
- * (e.g. re-grip a scale) without the object jumping.
+ * (e.g. re-grip a scale) without the object jumping. BOTH palms up is the
+ * explicit two-hand anchor: it pauses regardless of the drift guard below
+ * (see the rightPalm gate in processFrame).
  *
  * Stability model per mode (absolute-anchored, self-correcting):
  *   target = (smoothed hand − anchor) × gain; emitted = capped correction
@@ -73,7 +75,7 @@ const PAUSE_RELEASE_GRACE_MS = 700;
 const TRACKING_LOSS_GRACE_MS = 350;
 
 /**
- * Axis-selection context window (the pause-vs-selection disambiguation).
+ * Axis-selection HAND ROLE (the pause-vs-selection disambiguation).
  *
  * The Z axis is selected by holding THREE left fingers — the pose one step
  * from OPEN_PALM. On a real hand the pinky naturally drifts open, the
@@ -81,13 +83,25 @@ const TRACKING_LOSS_GRACE_MS = 350;
  * engaged while the user believed they were selecting/driving Z: the object
  * went dead on Z (X: 1 finger, Y: 2 fingers are far from the collision).
  *
- * Resolution by recency: an axis-selection count (1–3 fingers) marks the
- * left hand as the ACTIVE AXIS-SELECTION channel. For this long afterwards,
- * its 4-finger OPEN_PALM reads as "the selection hand is still present",
- * NOT as a pause request. A deliberate pause (an open palm with no recent
- * selection activity) is untouched.
+ * Resolution by ROLE, not by recency. Once the left hand shows an
+ * axis-selection count (1–3 fingers) it IS the selection hand, and it stays
+ * one for as long as it remains tracked: a 4-finger read of a continuously
+ * present selection hand is pinky drift, never a pause request. The former
+ * 500 ms recency window expired in the middle of a normal Z drive (a depth
+ * stroke lasts seconds), after which the pause engaged SILENTLY and froze
+ * every axis — the "CV stops responding" failure.
+ *
+ * The role is released only after the hand has been ABSENT for this long, so
+ * a deliberate pause stays available: lower the selection hand, then present
+ * the open palm. Tied to PAUSE_RELEASE_GRACE_MS so one momentary left-hand
+ * dropout can neither pause the session nor drop the role.
+ *
+ * The role never gates the TWO-HAND anchor: raising the right palm as well
+ * (both palms up) pauses immediately, role or no role — a drifted pinky only
+ * ever accompanies a DRIVING right-hand pose, so an open right palm can only
+ * mean an anchor request.
  */
-const AXIS_SELECTION_CONTEXT_MS = 500;
+const AXIS_SELECTION_HAND_RELEASE_MS = 700;
 
 /**
  * ROTATE execution hold (T-03) — bounded tolerance of pose-label flicker.
@@ -152,11 +166,14 @@ const MOVE_UNITS_PER_SCREEN = 4.0;
 /** Palm apparent-size change (toward/away camera) gain for MOVE Z.
  *  Rebalanced from 6.0: a comfortable depth push changes palm span by only
  *  ~8–12% (≈0.01–0.018 in span units), which at gain 6 produced 0.06–0.11
- *  world units — 5–10× weaker than an equivalent X/Y flick. 10.0 maps the
- *  same comfortable push to ≈1.0 world unit, matching X/Y effort.
+ *  world units — 5–10× weaker than an equivalent X/Y flick. Raised again to
+ *  13.0 (+30%) on live feedback that the corrected-sign axis still felt
+ *  sluggish next to X/Y; the per-frame cap (MAX_STEP_MOVE_Z) still bounds
+ *  what any single frame can contribute, so the boost shows up as travel per
+ *  stroke, not as faster lunges.
  *  (Noise safety: the slow EMA attenuates 8–12 Hz tremor to ±0.0003 span
- *  → ±0.003 world units, far below the Z deadzone.) */
-const MOVE_Z_UNITS_PER_DEPTH = 10.0;
+ *  → ±0.004 world units, far below the Z deadzone.) */
+const MOVE_Z_UNITS_PER_DEPTH = 13.0;
 /**
  * Per-frame Z step cap (MOVE). Deliberately ~half the X/Y cap: span noise
  * that survives the deadzone arrives as spikes, and an oversized Z step
@@ -321,13 +338,14 @@ export class InteractionController {
 
 
   /**
-   * Axis-selection context (see AXIS_SELECTION_CONTEXT_MS): the most recent
-   * frame time at which the left hand showed a selection finger count (1–3).
-   * While the pause decision is inside this window, a left OPEN_PALM is
-   * read as "the selection hand drifted open", not as a pause request —
-   * and PAUSE_CONFIRM frames are only earned after the window expires.
+   * Axis-selection hand role (see AXIS_SELECTION_HAND_RELEASE_MS): true from
+   * the first left-hand finger count (1–3) until that hand has been ABSENT
+   * for the release window. While true, a left OPEN_PALM is read as "the
+   * selection hand drifted open", never as a pause request.
    */
-  private lastSelectionSeenMs: TimestampMs | null = null;
+  private selectionHandRole = false;
+  /** When the selection hand was last seen absent (role-release timer). */
+  private selectionHandAbsentSince: TimestampMs | null = null;
   // Pause bookkeeping (left palm requires PAUSE_CONFIRM_FRAMES frames)
   private pauseFrames = 0;
   /** When the left palm disappeared while paused (resume grace window). */
@@ -538,18 +556,38 @@ export class InteractionController {
         };
       }
 
-      // ── Axis-selection context (BEFORE the pause path) ────
+      // ── Axis-selection hand role (BEFORE the pause path) ────
       // Track the left hand's finger-count intent so the pause gate below
       // can tell a deliberate OPEN_PALM pause from a drifted-open selection
       // hand. fingerState is what the axis detector reads (cv-engine
       // detectAxisFromLeftHand) — never the classified gesture, which is
       // exactly what flickers.
       if (left && this.isValidHand(left, 0.3)) {
+        this.selectionHandAbsentSince = null;
         const fs = left.fingerState;
         const count =
           (fs.index ? 1 : 0) + (fs.middle ? 1 : 0) + (fs.ring ? 1 : 0) + (fs.pinky ? 1 : 0);
         if (count >= 1 && count <= 3) {
-          this.lastSelectionSeenMs = now;
+          this.selectionHandRole = true;
+          // An explicit axis-selection count can never be a pause request, so
+          // it also RELEASES an engaged pause at once (the user is re-tensing
+          // the selection fingers to keep driving) instead of waiting out the
+          // palm-release grace.
+          if (this.paused) {
+            this.paused = false;
+            this.pauseGraceSince = null;
+            this.pauseFrames = 0;
+            if (rightValid && right) this.reanchor(right);
+          }
+        }
+      } else if (this.selectionHandRole) {
+        // Left hand absent: release the role only after the whole window, so
+        // a momentary tracker dropout neither pauses nor drops the role.
+        if (this.selectionHandAbsentSince === null) {
+          this.selectionHandAbsentSince = now;
+        } else if (now - this.selectionHandAbsentSince >= AXIS_SELECTION_HAND_RELEASE_MS) {
+          this.selectionHandRole = false;
+          this.selectionHandAbsentSince = null;
         }
       }
 
@@ -561,20 +599,32 @@ export class InteractionController {
       // interaction — with a grace window so removing the left hand
       // briefly does not stall the transformation.
       //
-      // Selection-context disambiguation (ticket 02): the left hand is ALSO
-      // the axis-selection channel — Z is selected with THREE fingers, one
-      // pose from OPEN_PALM. A pinky drift makes the classifier read
-      // OPEN_PALM while the user is selecting/driving Z, engaging this
-      // pause and killing the transformation (X: 1 finger, Y: 2 fingers
-      // are far from the collision). So the pause engages only when the
-      // left OPEN_PALM is NOT within the selection-context window of an
-      // axis-selection count; selection counts clear the pause frames.
+      // Selection-role disambiguation (ticket 02): the left hand is ALSO the
+      // axis-selection channel — Z is selected with THREE fingers, one pose
+      // from OPEN_PALM. A pinky drift makes the classifier read OPEN_PALM
+      // while the user is selecting/driving Z, engaging this pause and
+      // killing the transformation (X: 1 finger, Y: 2 fingers are far from
+      // the collision). So the pause engages only while the left hand is NOT
+      // the selection hand; selection counts clear the pause frames.
       const leftPalm = !!left && left.gesture === 'OPEN_PALM' && this.isValidHand(left, 0.3);
-      const inSelectionContext =
-        this.lastSelectionSeenMs !== null &&
-        now - this.lastSelectionSeenMs <= AXIS_SELECTION_CONTEXT_MS;
+      // ── Two-hand anchor (BOTH palms) ──
+      // The drift guard above keys on the selection HAND, which latches for as
+      // long as that hand stays tracked. Presenting both palms after a normal
+      // axis selection therefore used to suppress the pause forever: the
+      // anchor was "recognised" (palm on the left channel) yet never paused,
+      // and the right palm went on to confirm ROTATE — CV kept manipulating
+      // while the user believed the session was anchored. The two poses are
+      // physically distinct, so the guard is scoped to what the RIGHT hand is
+      // doing: a drifted pinky only ever rides along with a DRIVING pose
+      // (GRAB/PINCH/ROTATE_3/SCALE_POSE). A right OPEN_PALM means the user has
+      // both palms up — the deliberate two-hand anchor — so the pause must
+      // engage regardless of the latched role. A missing right hand keeps the
+      // old suppression (a right-slot dropout mid-drive must not pause).
+      const rightPalm = rightValid && !!right && right.gesture === 'OPEN_PALM';
+      const inSelectionContext = this.selectionHandRole && !rightPalm;
       if (leftPalm && !inSelectionContext) {
-        // CASE 1 — deliberate pause: no recent selection activity.
+        // CASE 1 — deliberate pause: no recent selection activity, or both
+        // palms up (the anchor pose beats the latched selection role).
         this.pauseFrames += 1;
         if (this.pauseFrames >= PAUSE_CONFIRM_FRAMES && !this.paused) {
           this.paused = true;
@@ -584,7 +634,7 @@ export class InteractionController {
         return this.publish();
       }
       if (leftPalm && inSelectionContext) {
-        // CASE 2 — drifted selection hand: cancel any pause-in-progress
+        // CASE 2 — drifted selection hand (right hand IS driving): cancel any pause-in-progress
         // frames and any ENGAGED pause (the user re-tensed the selection
         // fingers — e.g. back to 3 — which is selection activity, not a
         // pause). NO early return: a suppressed drift is "not a pause" —
@@ -821,8 +871,15 @@ export class InteractionController {
     let deadzone: number;
 
     if (this.controlAxis === 'Z') {
-      // Palm span shrinks as the hand moves away → object moves +Z (deeper).
-      target = (this.anchor.depth - this.smooth.depth) * MOVE_Z_UNITS_PER_DEPTH;
+      // Depth follows the hand exactly like X/Y follow the palm centre.
+      // The palm span GROWS as the hand comes toward the camera and world
+      // +Z is the CAMERA side (the scene camera sits at +Z looking at the
+      // origin), so a hand approaching must move the object toward the
+      // viewer (+Z) and a retreat must push it away (−Z, "through the
+      // screen"). The old (anchor − smooth) sign did the opposite: the
+      // object receded as the hand approached, i.e. Z ran AGAINST the hand
+      // while X and Y ran WITH it.
+      target = (this.smooth.depth - this.anchor.depth) * MOVE_Z_UNITS_PER_DEPTH;
       deadzone = DEADZONE_MOVE_Z;
     } else if (this.controlAxis === 'X') {
       // Camera image x is mirrored relative to the user → negate.
@@ -1222,7 +1279,8 @@ export class InteractionController {
     this.prevRaw = null;
     this.pauseFrames = 0;
     this.pauseGraceSince = null;
-    this.lastSelectionSeenMs = null;
+    this.selectionHandRole = false;
+    this.selectionHandAbsentSince = null;
     this.lastRotateReadableMs = null;
     // T-04: velocity-sputter bridge state dies with the session.
     this.lastAboveGateMs = null;
