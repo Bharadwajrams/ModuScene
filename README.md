@@ -12,6 +12,10 @@ npm run build      # production build → dist/
 npm run typecheck  # strict TypeScript, no emit
 ```
 
+### Windows: one-click launch
+
+Windows developers can double-click `Start-ModuScene.bat` in the project root to start the development server and open ModuScene in their browser. Node.js and npm must be installed first. If dependencies are missing, the launcher will install them automatically. Keep the terminal window open while using the application.
+
 ## Controls
 
 |Input|Action|
