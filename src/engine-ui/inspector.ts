@@ -17,6 +17,41 @@ import { EventBus } from '../core/event-bus';
 import { DisplayAdapter } from '../engine-3d/display-adapter';
 import { TransformService } from '../engine-3d/transform-service';
 
+/**
+ * Parse what the user typed into an Inspector field.
+ * Returns null for empty / non-numeric text so the caller can restore the
+ * applied value instead of writing a guessed 0.
+ */
+export function parseInspectorValue(raw: string): number | null {
+  const text = raw.trim();
+  if (text === '') return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+// ─── Value Formatting ────────────────────────────────────
+
+/**
+ * Format a scene value for an Inspector field.
+ *
+ * The Inspector used to render every value with `toFixed(2)`, which made the
+ * bar LIE about the module: a CV- or import-scale like 1.2345 was stored at
+ * full precision but displayed as "1.23", and the next spinner/arrow press
+ * then rewrote the real 1.2345 as 1.24. Values are therefore shown at the
+ * precision they actually have — the familiar 2-decimal look is kept for
+ * values that really sit on that grid.
+ *
+ * `toFixed(6)` only discards float noise from the radians↔degrees round trip
+ * (30.000000000000004 → "30.00"); it never hides a value the scene keeps.
+ */
+export function formatInspectorValue(value: number): string {
+  if (!Number.isFinite(value)) return '0.00';
+
+  const cleaned = Number(value.toFixed(6));
+  const onTwoDecimalGrid = Math.abs(cleaned - Math.round(cleaned * 100) / 100) < 1e-9;
+  return onTwoDecimalGrid ? cleaned.toFixed(2) : String(cleaned);
+}
+
 // ─── Inspector ───────────────────────────────────────────
 
 export class Inspector {
@@ -75,7 +110,7 @@ export class Inspector {
 
     this.eventBus.on('transform:changed', (event) => {
       if (event.objectId === this.currentObjectId) {
-        this.refreshValues();
+        this.refreshValues(true);
       }
     });
 
@@ -116,10 +151,28 @@ export class Inspector {
       input.dataset.property = property;
       input.dataset.axis = axis;
 
+      // Uncommitted text: keep refreshes from overwriting what is being typed.
+      input.addEventListener('input', () => {
+        input.dataset.dirty = '1';
+      });
+
       input.addEventListener('change', () => {
+        delete input.dataset.dirty;
         if (!this.currentObjectId) return;
-        const newValue = parseFloat(input.value) || 0;
+        const newValue = parseInspectorValue(input.value);
+        if (newValue === null) {
+          // Empty or unparseable text is NOT the number 0 — restore the value
+          // the module actually has instead of collapsing the axis.
+          this.refreshValues();
+          return;
+        }
         this.emitSetTransformCommand(property, axis, newValue);
+      });
+
+      // Blur normalises the field to the value that was really applied.
+      input.addEventListener('blur', () => {
+        delete input.dataset.dirty;
+        this.refreshValues();
       });
 
       wrapper.appendChild(axisLabel);
@@ -241,6 +294,10 @@ export class Inspector {
     this.emptyState.style.display = hasSelection ? 'none' : 'flex';
     this.contentEl.style.display = hasSelection ? 'block' : 'none';
 
+    // A selection change ends any edit in progress — drop the uncommitted
+    // markers so they cannot suppress a later refresh.
+    this.clearDirtyFlags();
+
     if (hasSelection) {
       try {
         const viewModel = this.displayAdapter.getInspectorViewModel(this.currentObjectId);
@@ -256,35 +313,60 @@ export class Inspector {
     }
   }
 
-  private refreshValues(): void {
+  /**
+   * Write the scene values into the fields.
+   *
+   * `keepFocused` is used for `transform:changed` refreshes: a field holding
+   * uncommitted text is left untouched, so an incoming transform (CV frame,
+   * group move, Scale All) can no longer erase half-typed digits. Selection
+   * changes, Undo/Redo and committed edits still update every field.
+   */
+  private refreshValues(keepFocused = false): void {
     if (!this.currentObjectId) return;
 
     try {
       const viewModel = this.displayAdapter.getInspectorViewModel(this.currentObjectId);
 
       if (viewModel.move) {
-        this.moveInputs.x.value = viewModel.move.x.toFixed(2);
-        this.moveInputs.y.value = viewModel.move.y.toFixed(2);
-        this.moveInputs.z.value = viewModel.move.z.toFixed(2);
+        this.writeValue(this.moveInputs.x, viewModel.move.x, keepFocused);
+        this.writeValue(this.moveInputs.y, viewModel.move.y, keepFocused);
+        this.writeValue(this.moveInputs.z, viewModel.move.z, keepFocused);
       }
 
       if (viewModel.scale) {
-        this.scaleInputs.x.value = viewModel.scale.x.toFixed(2);
-        this.scaleInputs.y.value = viewModel.scale.y.toFixed(2);
-        this.scaleInputs.z.value = viewModel.scale.z.toFixed(2);
+        this.writeValue(this.scaleInputs.x, viewModel.scale.x, keepFocused);
+        this.writeValue(this.scaleInputs.y, viewModel.scale.y, keepFocused);
+        this.writeValue(this.scaleInputs.z, viewModel.scale.z, keepFocused);
       }
 
       if (viewModel.rotationDegrees) {
-        this.rotationInputs.x.value = viewModel.rotationDegrees.x.toFixed(2);
-        this.rotationInputs.y.value = viewModel.rotationDegrees.y.toFixed(2);
-        this.rotationInputs.z.value = viewModel.rotationDegrees.z.toFixed(2);
+        this.writeValue(this.rotationInputs.x, viewModel.rotationDegrees.x, keepFocused);
+        this.writeValue(this.rotationInputs.y, viewModel.rotationDegrees.y, keepFocused);
+        this.writeValue(this.rotationInputs.z, viewModel.rotationDegrees.z, keepFocused);
       }
     } catch (e) {
       console.error('[Inspector] refreshValues error:', e);
     }
   }
 
+  private writeValue(input: HTMLInputElement, value: number, keepFocused: boolean): void {
+    // Only text the user has not committed yet is protected — a merely focused
+    // field still follows Undo/Redo and CV frames.
+    if (keepFocused && input.dataset.dirty === '1') return;
+    input.value = formatInspectorValue(value);
+  }
+
+  /** Forget "user is still typing" markers on every field. */
+  private clearDirtyFlags(): void {
+    for (const group of [this.moveInputs, this.scaleInputs, this.rotationInputs]) {
+      for (const input of [group.x, group.y, group.z]) {
+        delete input.dataset.dirty;
+      }
+    }
+  }
+
   private clearValues(): void {
+    this.clearDirtyFlags();
     this.moveInputs.x.value = '';
     this.moveInputs.y.value = '';
     this.moveInputs.z.value = '';
