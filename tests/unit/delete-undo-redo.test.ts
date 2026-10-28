@@ -18,6 +18,7 @@ import { EventBus } from '../../src/core/event-bus';
 import { HistoryManager } from '../../src/core/history-manager';
 import { SceneManager } from '../../src/engine-3d/scene-manager';
 import { TransformService } from '../../src/engine-3d/transform-service';
+import { SelectionManager } from '../../src/engine-3d/selection-manager';
 import type { HistoryRecord, ObjectId, TransformSnapshot } from '../../src/core/contracts';
 
 // ─── Harness ─────────────────────────────────────────────
@@ -33,6 +34,12 @@ function setup() {
   const scene = new THREE.Scene();
   const sceneManager = new SceneManager(scene);
   const transformService = new TransformService(eventBus, sceneManager);
+  const selectionManager = new SelectionManager(
+    eventBus,
+    scene,
+    (id) => sceneManager.getObject(id),
+    (id) => sceneManager.getObject(id)?.name ?? id,
+  );
   const deletedMeta = new Map<ObjectId, DeletedMeta>();
 
   const history = new HistoryManager(
@@ -75,13 +82,74 @@ function setup() {
     });
   };
 
+  /**
+   * Mirror of `MainApp.getSelectedModuleIds()`: checked modules are
+   * authoritative, the selected module is used only when nothing is checked.
+   */
+  const resolveSelectionTargets = (
+    primaryId: ObjectId | null,
+    checkedIds: ObjectId[],
+  ): ObjectId[] => {
+    const ids: ObjectId[] = [];
+    for (const id of checkedIds) {
+      if (ids.includes(id)) continue;
+      if (!sceneManager.getObject(id)) continue;
+      ids.push(id);
+    }
+    if (ids.length > 0) return ids;
+    return primaryId && sceneManager.getObject(primaryId) ? [primaryId] : [];
+  };
+
+  /**
+   * Mirror of `MainApp.handleDelete()` for a multi-selection: collect the
+   * targets first, then detach each instance and record one DELETE entry per
+   * module, then clear the selection.
+   */
+  const deleteSelection = (
+    primaryId: ObjectId | null,
+    checkedIds: ObjectId[] = [],
+  ): ObjectId[] => {
+    const targetIds = resolveSelectionTargets(primaryId, checkedIds);
+    if (targetIds.length === 0) return [];
+
+    for (const objectId of targetIds) {
+      const before = transformService.getTransform(objectId);
+      const detached = sceneManager.detachObject(objectId);
+      if (before && detached) {
+        deletedMeta.set(objectId, { name: detached.name, object: detached, snapshot: before });
+      }
+      history.recordAction({
+        commandId: history.generateCommandId(),
+        actionType: 'DELETE',
+        targetObjectId: objectId,
+        source: 'UI',
+        before: before ?? undefined,
+        timestamp: history.now(),
+      });
+    }
+
+    selectionManager.select(null);
+    return targetIds;
+  };
+
   const addModule = (name = 'cube'): ObjectId =>
     sceneManager.addObject(
       new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial()),
       name,
     );
 
-  return { scene, sceneManager, transformService, history, deleteObject, addModule, deletedMeta };
+  return {
+    scene,
+    sceneManager,
+    transformService,
+    selectionManager,
+    history,
+    deleteObject,
+    deleteSelection,
+    resolveSelectionTargets,
+    addModule,
+    deletedMeta,
+  };
 }
 
 let h: ReturnType<typeof setup>;
@@ -301,5 +369,210 @@ describe('SceneManager — restoreId', () => {
     const restoredId = h.sceneManager.addObject(detached, 'door', id);
     expect(restoredId).toBe(id);
     expect(h.sceneManager.getObject(id)).toBe(detached);
+  });
+});
+
+// ─── Delete — multiple selected modules ─────────────────
+
+describe('Delete — multiple selected modules', () => {
+  it('deletes every module checked in the selector', () => {
+    const a = h.addModule('Ground_Tile');
+    const b = h.addModule('Group_House');
+    const c = h.addModule('Stone_Ground');
+
+    const deleted = h.deleteSelection(null, [a, b, c]);
+
+    expect(deleted).toEqual([a, b, c]);
+    expect(h.sceneManager.objectCount).toBe(0);
+    expect(h.sceneManager.hasObject(a)).toBe(false);
+    expect(h.sceneManager.hasObject(b)).toBe(false);
+    expect(h.sceneManager.hasObject(c)).toBe(false);
+  });
+
+  it('deletes only the checked modules and leaves the rest untouched', () => {
+    const checked1 = h.addModule('a');
+    const checked2 = h.addModule('b');
+    const unselected = h.addModule('keep-me');
+
+    const deleted = h.deleteSelection(null, [checked1, checked2]);
+
+    expect(deleted).toHaveLength(2);
+    expect(h.sceneManager.objectCount).toBe(1);
+    expect(h.sceneManager.getObject(unselected)!.name).toBe('keep-me');
+  });
+
+  it('does NOT delete an unchecked module that merely happens to be selected', () => {
+    const staleSelection = h.addModule('old-selection');
+    const checked1 = h.addModule('a');
+    const checked2 = h.addModule('b');
+
+    const deleted = h.deleteSelection(staleSelection, [checked1, checked2]);
+
+    expect(deleted).toEqual([checked1, checked2]);
+    expect(h.sceneManager.getObject(staleSelection)).not.toBeNull();
+    expect(h.sceneManager.objectCount).toBe(1);
+  });
+
+  it('deletes the selected module alone when nothing is checked', () => {
+    const selected = h.addModule('a');
+    const other = h.addModule('b');
+
+    const deleted = h.deleteSelection(selected);
+
+    expect(deleted).toEqual([selected]);
+    expect(h.sceneManager.hasObject(selected)).toBe(false);
+    expect(h.sceneManager.hasObject(other)).toBe(true);
+  });
+
+  it('deletes a checked module only once when it is also the selection', () => {
+    const a = h.addModule('a');
+    const b = h.addModule('b');
+
+    const deleted = h.deleteSelection(a, [a, b]);
+
+    expect(deleted).toEqual([a, b]);
+    expect(h.sceneManager.objectCount).toBe(0);
+  });
+
+  it('falls back to the selected module when every checked id is stale', () => {
+    const selected = h.addModule('a');
+    const gone = h.addModule('gone');
+    h.sceneManager.removeObject(gone);
+
+    const deleted = h.deleteSelection(selected, [gone]);
+
+    expect(deleted).toEqual([selected]);
+    expect(h.sceneManager.objectCount).toBe(0);
+  });
+
+  it('clears the selection so no deleted module stays active', () => {
+    const a = h.addModule('a');
+    const b = h.addModule('b');
+    h.selectionManager.select(a);
+    expect(h.selectionManager.selectedId).toBe(a);
+
+    h.deleteSelection(a, [a, b]);
+
+    expect(h.selectionManager.selectedId).toBeNull();
+    expect(h.sceneManager.objectCount).toBe(0);
+  });
+
+  it('does nothing when there is no selection', () => {
+    h.addModule('a');
+
+    expect(h.deleteSelection(null, [])).toEqual([]);
+    expect(h.sceneManager.objectCount).toBe(1);
+    expect(h.history.undoDepth).toBe(0);
+    expect(h.selectionManager.selectedId).toBeNull();
+  });
+
+  it('removes one instance of a shared asset without touching its sibling', () => {
+    // Two instances of the same imported module: same asset, different ids.
+    const makeInstance = () =>
+      new THREE.Mesh(
+        new THREE.BoxGeometry(1, 1, 1),
+        new THREE.MeshStandardMaterial({ color: 0x884422 }),
+      );
+    const firstMesh = makeInstance();
+    const secondMesh = makeInstance();
+    const first = h.sceneManager.addObject(firstMesh, 'village_house');
+    const second = h.sceneManager.addObject(secondMesh, 'village_house');
+
+    h.deleteSelection(first);
+
+    expect(h.sceneManager.hasObject(first)).toBe(false);
+    expect(h.sceneManager.hasObject(second)).toBe(true);
+    const survivor = h.sceneManager.getObject(second) as THREE.Mesh;
+    expect(survivor).toBe(secondMesh);
+    // Resources were never disposed, so the surviving instance still renders.
+    expect(survivor.geometry).toBe(secondMesh.geometry);
+    expect(survivor.material).toBe(secondMesh.material);
+    expect(h.deletedMeta.get(first)!.object).toBe(firstMesh);
+  });
+
+  it('never touches the asset catalog, so a deleted asset can be added again', () => {
+    const assets = [{ assetId: 'asset-house', name: 'village_house' }];
+    const before = JSON.stringify(assets);
+
+    const a = h.addModule('village_house');
+    h.deleteSelection(a);
+
+    expect(h.sceneManager.objectCount).toBe(0);
+    expect(JSON.stringify(assets)).toBe(before);
+
+    // The asset is still usable: a new instance registers under a fresh id.
+    const readded = h.sceneManager.addObject(
+      new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial()),
+      assets[0].name,
+    );
+    expect(h.sceneManager.hasObject(readded)).toBe(true);
+    expect(readded).not.toBe(a);
+  });
+
+  it('undo restores every deleted module under its own id and transform', () => {
+    const a = h.addModule('a');
+    const b = h.addModule('b');
+    const c = h.addModule('c');
+    const originals = new Map(
+      [a, b, c].map((id) => [id, h.sceneManager.getObject(id)!] as const),
+    );
+    h.sceneManager.getObject(a)!.position.set(3, 0, -2);
+    h.sceneManager.getObject(b)!.position.set(-1, 2, 0);
+    h.sceneManager.getObject(c)!.scale.set(2, 1.5, 0.5);
+
+    h.deleteSelection(null, [a, b, c]);
+    expect(h.sceneManager.objectCount).toBe(0);
+
+    h.history.undo();
+    h.history.undo();
+    h.history.undo();
+
+    expect(h.sceneManager.objectCount).toBe(3);
+    for (const id of [a, b, c]) {
+      expect(h.sceneManager.getObject(id)).toBe(originals.get(id));
+      expect(h.sceneManager.hasObject(id)).toBe(true);
+    }
+    expect(h.sceneManager.getObject(a)!.position.toArray()).toEqual([3, 0, -2]);
+    expect(h.sceneManager.getObject(b)!.position.toArray()).toEqual([-1, 2, 0]);
+    expect(h.sceneManager.getObject(c)!.scale.toArray()).toEqual([2, 1.5, 0.5]);
+  });
+
+  it('removes the group again on redo and stays consistent across cycles', () => {
+    const a = h.addModule('a');
+    const b = h.addModule('b');
+
+    h.deleteSelection(a, [a, b]);
+
+    for (let i = 0; i < 3; i++) {
+      h.history.undo();
+      h.history.undo();
+      expect(h.sceneManager.objectCount).toBe(2);
+      expect(h.sceneManager.hasObject(a)).toBe(true);
+      expect(h.sceneManager.hasObject(b)).toBe(true);
+
+      h.history.redo();
+      h.history.redo();
+      expect(h.sceneManager.objectCount).toBe(0);
+    }
+  });
+
+  it('keeps deleting correctly across duplication and further deletions', () => {
+    const a = h.addModule('a');
+    const b = h.addModule('b');
+    const pairs = h.sceneManager.duplicateObjects([a, b]);
+    const copyA = pairs[0].cloneId;
+    const copyB = pairs[1].cloneId;
+
+    // Delete the copies only — the originals must survive
+    h.deleteSelection(null, [copyA, copyB]);
+    expect(h.sceneManager.hasObject(a)).toBe(true);
+    expect(h.sceneManager.hasObject(b)).toBe(true);
+    expect(h.sceneManager.objectCount).toBe(2);
+
+    // A later group delete of the remaining modules still works
+    h.deleteSelection(a, [a, b]);
+    expect(h.sceneManager.objectCount).toBe(0);
+    expect(h.sceneManager.hasObject(copyA)).toBe(false);
+    expect(new Set([a, b, copyA, copyB]).size).toBe(4);
   });
 });

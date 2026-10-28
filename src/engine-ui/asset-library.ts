@@ -10,18 +10,59 @@
 import type { AssetRecord, AssetId } from '../core/contracts';
 import { EventBus } from '../core/event-bus';
 
+// ─── Search ──────────────────────────────────────────────
+
+/**
+ * Normalize a user query for case-insensitive substring matching.
+ * Whitespace-only input normalizes to '' (= unfiltered), so a stray space
+ * can never hide the whole catalog.
+ */
+export function normalizeAssetQuery(query: string): string {
+  return query.trim().toLowerCase();
+}
+
+/**
+ * Assets whose displayed name contains `query` as a case-insensitive
+ * substring, in their catalog order.
+ *
+ * Matching runs on `name`, which is the filename without its `.glb`/`.gltf`
+ * extension (see AssetManager.importAsset) — so `Grou` finds
+ * `Ground_Tile.glb` and typing the extension is never required. This is a
+ * plain in-memory scan: nothing is loaded, cloned or re-parsed to filter.
+ */
+export function filterAssets(assets: AssetRecord[], query: string): AssetRecord[] {
+  const needle = normalizeAssetQuery(query);
+  if (needle === '') return assets;
+  return assets.filter((asset) => asset.name.toLowerCase().includes(needle));
+}
+
 // ─── Asset Library ───────────────────────────────────────
 
 export class AssetLibrary {
   private container: HTMLElement;
+  private searchEl: HTMLInputElement;
   private listEl: HTMLElement;
   private emptyEl: HTMLElement;
+  private noResultsEl: HTMLElement;
   private assets: AssetRecord[] = [];
+  private query = '';
   private onAddToScene: ((assetId: AssetId) => void) | null = null;
 
   constructor(_eventBus: EventBus, container: HTMLElement) {
     this.container = container;
     this.container.classList.add('asset-library-panel__content');
+
+    // Search field at the top of the panel. It filters this list only — it
+    // never touches the scene, the selection or the loaded GLTF cache.
+    this.searchEl = document.createElement('input');
+    this.searchEl.type = 'search';
+    this.searchEl.className = 'asset-library-panel__search';
+    this.searchEl.placeholder = 'Search assets...';
+    this.searchEl.setAttribute('aria-label', 'Search assets');
+    this.searchEl.addEventListener('input', () => {
+      this.query = this.searchEl.value;
+      this.render();
+    });
 
     this.listEl = document.createElement('div');
     this.listEl.className = 'asset-library-panel__list';
@@ -30,8 +71,15 @@ export class AssetLibrary {
     this.emptyEl.className = 'asset-library-panel__empty';
     this.emptyEl.textContent = 'No assets imported';
 
+    this.noResultsEl = document.createElement('div');
+    this.noResultsEl.className = 'asset-library-panel__empty';
+    this.noResultsEl.textContent = 'No matching assets found';
+    this.noResultsEl.style.display = 'none';
+
+    this.container.appendChild(this.searchEl);
     this.container.appendChild(this.listEl);
     this.container.appendChild(this.emptyEl);
+    this.container.appendChild(this.noResultsEl);
 
     // Listen for open/close to show/hide empty state appropriately
     _eventBus.on('asset-library:toggle', (open: boolean) => {
@@ -59,10 +107,15 @@ export class AssetLibrary {
   private render(): void {
     this.listEl.innerHTML = '';
 
+    // Filter first, then paint: the two sections below keep their existing
+    // order and headers, but describe only what matched.
+    const matches = filterAssets(this.assets, this.query);
+    const searching = normalizeAssetQuery(this.query) !== '';
+
     // Built-in basic shapes render in their own section above the imports;
     // everything else keeps the existing flat imported list.
-    const shapes = this.assets.filter((a) => a.sourceType === 'PRIMITIVE');
-    const imports = this.assets.filter((a) => a.sourceType !== 'PRIMITIVE');
+    const shapes = matches.filter((a) => a.sourceType === 'PRIMITIVE');
+    const imports = matches.filter((a) => a.sourceType !== 'PRIMITIVE');
 
     if (shapes.length > 0) {
       const header = document.createElement('div');
@@ -82,13 +135,25 @@ export class AssetLibrary {
 
     if (this.assets.length === 0) {
       this.emptyEl.style.display = 'flex';
+      this.noResultsEl.style.display = 'none';
       this.listEl.style.display = 'none';
       return;
     }
 
+    // A query that matches nothing gets its own message, so it is never
+    // confused with an empty catalog.
+    if (searching && matches.length === 0) {
+      this.emptyEl.style.display = 'none';
+      this.noResultsEl.style.display = 'flex';
+      this.listEl.style.display = 'none';
+      return;
+    }
+
+    this.noResultsEl.style.display = 'none';
+
     // With built-in shapes present the list always has content; the "no
     // assets imported" hint only makes sense when there are no IMPORTS.
-    this.emptyEl.style.display = imports.length === 0 ? 'flex' : 'none';
+    this.emptyEl.style.display = !searching && imports.length === 0 ? 'flex' : 'none';
     this.listEl.style.display = 'flex';
   }
 

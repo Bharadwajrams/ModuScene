@@ -12,8 +12,9 @@ import { EventBus } from './core/event-bus';
 import { CommandRouter } from './core/command-router';
 import { HistoryManager } from './core/history-manager';
 import { TransformHistory } from './core/transform-history';
+import { resolveAppShortcut } from './core/keyboard-shortcuts';
 import { SceneCore } from './engine-3d/scene';
-import { SceneManager } from './engine-3d/scene-manager';
+import { SceneManager, nextDuplicateName } from './engine-3d/scene-manager';
 import { SelectionManager } from './engine-3d/selection-manager';
 import { TransformService } from './engine-3d/transform-service';
 import { CameraController } from './engine-3d/camera-controller';
@@ -319,16 +320,30 @@ class ModuleBuilderApp {
 
   // ─── Duplicate / Delete with History ──────────────────
 
+  /**
+   * Duplicate the current selection.
+   *
+   * Checked modules are authoritative: as soon as the user ticks one or more
+   * modules in the Inspector's Manual Module Selector, Duplicate copies
+   * EXACTLY those modules — never a module that merely happened to be selected
+   * earlier. With nothing checked the behaviour is the previous single-module
+   * duplication of the selected module.
+   */
   private handleDuplicate(): void {
-    const selId = this.selectionManager.selectedId;
-    if (!selId) return;
+    const targetIds = this.getSelectedModuleIds();
+    if (targetIds.length === 0) return;
 
-    const cloneId = this.sceneManager.duplicateObject(selId);
-    if (cloneId) {
+    // One clone per target, all shifted by the same offset, so the copies keep
+    // the originals' relative arrangement. Each copy owns a fresh unique id and
+    // an independent transform (Object3D.clone copies position/rotation/scale
+    // per instance), so moving a copy can never move its original.
+    const copies = this.sceneManager.duplicateObjects(targetIds);
+
+    for (const { sourceId, cloneId } of copies) {
       const afterSnapshot = this.transformService.getTransform(cloneId);
 
       // Store metadata for undo (remove clone) / redo (re-create clone)
-      const originalObj = this.sceneManager.getObject(selId);
+      const originalObj = this.sceneManager.getObject(sourceId);
       const assetEntry = this.assetManager.getAllAssets().find(
         (a) => a.name === originalObj?.name,
       );
@@ -345,14 +360,46 @@ class ModuleBuilderApp {
         after: afterSnapshot ?? undefined,
         timestamp: this.historyManager.now(),
       });
-      this.selectionManager.select(cloneId);
-      this.moduleSelection.refresh();
-      this.manualModuleSelector.refresh();
     }
+
+    // Existing convention: the new copy becomes the selection. With several
+    // copies, the copy of the SELECTED module is preferred when it was part of
+    // the duplicated set, so the Inspector keeps following the module the user
+    // was working on; otherwise the first copy is selected.
+    const primaryId = this.selectionManager.selectedId;
+    const selectedClone =
+      copies.find((copy) => copy.sourceId === primaryId)?.cloneId ??
+      copies[0]?.cloneId;
+    if (selectedClone) this.selectionManager.select(selectedClone);
+    this.moduleSelection.refresh();
+    this.manualModuleSelector.refresh();
+  }
+
+  /**
+   * Modules the selection-based commands (Duplicate, Delete) operate on.
+   *
+   * Checked modules win: the checked set IS the multi-selection, so only those
+   * modules are targeted (the selected module is included only when it is also
+   * checked). Checked ids are validated against the live scene and
+   * de-duplicated, so a stale checkbox can never be targeted. With nothing
+   * checked, the selected module alone is returned — unchanged behaviour.
+   */
+  private getSelectedModuleIds(): ObjectId[] {
+    const ids: ObjectId[] = [];
+    for (const id of this.manualModuleSelector.getCheckedObjectIds()) {
+      if (ids.includes(id)) continue;
+      if (!this.sceneManager.getObject(id)) continue;
+      ids.push(id);
+    }
+    if (ids.length > 0) return ids;
+
+    const primaryId = this.selectionManager.selectedId;
+    return primaryId && this.sceneManager.getObject(primaryId) ? [primaryId] : [];
   }
 
   /**
    * Keyboard shortcuts (additive only — no existing behavior changes).
+   *   Shift + D    → same action as the toolbar Duplicate button
    *   Delete       → same action as the toolbar Delete button
    *   W / S        → move selected object along +Z / −Z
    *   A / D        → move selected object along −X / +X
@@ -360,15 +407,33 @@ class ModuleBuilderApp {
    */
   private setupKeyboardShortcuts(): void {
     document.addEventListener('keydown', (event: KeyboardEvent) => {
-      // Never while typing in a form field or contenteditable area
+      // Never while typing in a form field or contenteditable area.
+      //
+      // A focused CHECKBOX is not text entry: the module selector leaves focus
+      // on the box the user just ticked (that is exactly how a multi-selection
+      // is built), so the command shortcuts must still work there. The movement
+      // nudges below stay out of that popup as before.
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName;
+      const isCheckbox =
+        tag === 'INPUT' && (target as HTMLInputElement).type === 'checkbox';
       if (
-        tag === 'INPUT' ||
-        tag === 'TEXTAREA' ||
-        tag === 'SELECT' ||
-        target?.isContentEditable
+        !isCheckbox &&
+        (tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          target?.isContentEditable)
       ) {
+        return;
+      }
+
+      // Shift+D → Duplicate (same code path as the toolbar button). The event
+      // is claimed even while the keys auto-repeat, so holding them can never
+      // fall through to the 'D' movement nudge; only the first press acts.
+      if (resolveAppShortcut(event) === 'DUPLICATE') {
+        event.preventDefault();
+        if (event.repeat) return;
+        this.handleDuplicate();
         return;
       }
 
@@ -377,6 +442,9 @@ class ModuleBuilderApp {
         this.handleDelete();
         return;
       }
+
+      // Movement shortcuts are not part of the module-selector popup.
+      if (isCheckbox) return;
 
       // Leave browser/app shortcuts (Ctrl+W, Cmd+W, Alt+…) untouched
       if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -431,36 +499,49 @@ class ModuleBuilderApp {
     }
   }
 
+  /**
+   * Delete every module in the current selection.
+   *
+   * Same selection rule as Duplicate: checked modules are authoritative, and
+   * the selected module alone is used when nothing is checked. The target list
+   * is collected ONCE before anything is removed, so clearing the selection
+   * mid-operation can never skip a module.
+   */
   private handleDelete(): void {
-    const selId = this.selectionManager.selectedId;
-    if (!selId) return;
+    const targetIds = this.getSelectedModuleIds();
+    if (targetIds.length === 0) return;
 
-    // Capture before state for undo (re-add object)
-    const beforeSnapshot = this.transformService.getTransform(selId);
+    for (const objectId of targetIds) {
+      // Capture before state for undo (re-add object)
+      const beforeSnapshot = this.transformService.getTransform(objectId);
 
-    // Detach WITHOUT disposing: undo restores this exact instance (geometry,
-    // textures, materials, name) instead of rebuilding a placeholder.
-    const detached = this.sceneManager.detachObject(selId);
+      // Detach WITHOUT disposing: undo restores this exact instance (geometry,
+      // textures, materials, name) instead of rebuilding a placeholder. Removal
+      // is by SCENE-INSTANCE id, so other instances of the same asset — and the
+      // asset itself in the Asset Bar — are untouched.
+      const detached = this.sceneManager.detachObject(objectId);
 
-    if (beforeSnapshot && detached) {
-      this.deletedObjectMeta.set(selId, {
-        name: detached.name || 'Deleted Object',
-        object: detached,
-        snapshot: beforeSnapshot,
+      if (beforeSnapshot && detached) {
+        this.deletedObjectMeta.set(objectId, {
+          name: detached.name || 'Deleted Object',
+          object: detached,
+          snapshot: beforeSnapshot,
+        });
+      }
+
+      // One DELETE entry per module: the existing undo/redo handling restores
+      // each removed instance under its own id, exactly as for single deletes.
+      this.historyManager.recordAction({
+        commandId: this.historyManager.generateCommandId(),
+        actionType: 'DELETE',
+        targetObjectId: objectId,
+        source: 'UI',
+        before: beforeSnapshot ?? undefined,
+        timestamp: this.historyManager.now(),
       });
     }
 
     this.selectionManager.select(null);
-
-    this.historyManager.recordAction({
-      commandId: this.historyManager.generateCommandId(),
-      actionType: 'DELETE',
-      targetObjectId: selId,
-      source: 'UI',
-      before: beforeSnapshot ?? undefined,
-      timestamp: this.historyManager.now(),
-    });
-
     this.moduleSelection.refresh();
     this.manualModuleSelector.refresh();
   }
@@ -478,7 +559,12 @@ class ModuleBuilderApp {
           const originalObj = this.sceneManager.getObject(original.objectId);
           if (originalObj) {
             const clone = originalObj.clone(true);
-            const newId = this.sceneManager.addObject(clone, meta.name);
+            // Same numbered naming as a fresh duplicate, so redo never leaves
+            // two modules sharing one display name.
+            const newId = this.sceneManager.addObject(
+              clone,
+              nextDuplicateName(meta.name, this.sceneManager.objectNames()),
+            );
             this.transformService.setTransform(newId, record.after);
             this.selectionManager.select(newId);
           }
